@@ -1,0 +1,64 @@
+{
+  "KeelSpinVault": {
+    "hash": "0x18f049b603a4feb58afb6575fbc91cc8b9ec354e3b10abdede009269ed5ff59c",
+    "bytes": 24576,
+    "immutableReferences": [
+      {
+        "start": 22606,
+        "length": 32
+      },
+      {
+        "start": 22789,
+        "length": 32
+      },
+      {
+        "start": 22559,
+        "length": 32
+      },
+      {
+        "start": 22685,
+        "length": 32
+      },
+      {
+        "start": 22723,
+        "length": 32
+      },
+      {
+        "start": 7170,
+        "length": 32
+      },
+      {
+        "start": 7211,
+        "length": 32
+      }
+    ],
+    "abiHash": "e148d719fa2a3e46fb6d3e83ff7e2a799e6ae33481a12d34d12c865c6c27cba0"
+  },
+  "KeelFwaRouter": {
+    "hash": "0x74bf1e1d21acf1b7d2caa1324e6b50e323ef9a6109572f02f9b3932c8f21929a",
+    "bytes": 7327,
+    "immutableReferences": [
+      {
+        "start": 331,
+        "length": 32
+      },
+      {
+        "start": 3365,
+        "length": 32
+      },
+      {
+        "start": 4165,
+        "length": 32
+      },
+      {
+        "start": 6013,
+        "length": 32
+      },
+      {
+        "start": 6870,
+        "length": 32
+      }
+    ],
+    "abiHash": "1089d17e3ca01ed0a532b200b7710bcac0192022d668384c4338e35a38e745c0"
+  }
+}

@@ -1,5 +1,56 @@
 # Keel Spin
 
+A static, mobile-first Ethereum app for the live KeelSpinVault and KeelFwaRouter. The website source is in `web/`; the ready-to-serve export is `dist/`. It needs no application server and uses relative asset URLs for subpath/IPFS hosting. Existing Solidity source and build configuration are preserved below.
+
+## Website: install, build and preview
+
+Use Node 22 or newer and npm:
+
+```sh
+npm ci --prefix web
+npm --prefix web run typecheck
+npm --prefix web test
+npm --prefix web run build
+npm --prefix web run preview -- --port 4173
+```
+
+Open the preview URL, or serve the root `dist/` directory with any static HTTP server. Use `npm --prefix web run dev` for development. Rebuilding replaces `dist/`; deploy its complete contents, including every generated asset. No dependency directory belongs in the submission.
+
+The four tabs are `#spin`, `#history`, `#mine` and `#info`. All chain data is readable without a wallet. For a clearly marked, transaction-disabled preview of 31 sample spins, open `?demo=1#history`. These fixture events cover pre-check, oracle, both fallbacks, external resolution, kept NFTs, pending sales, ETH bids and completed sales, with two history pages.
+
+## Network and wallets
+
+`web/src/contracts/deployment.json` and `network.json` retain the supplied handoff. Contract addresses, deployment block, explorer and default RPCs are imported from those files. `VITE_RPC_URL` optionally adds a preferred RPC at build time; public fallbacks remain the handoff's PublicNode and dRPC endpoints. `VITE_WALLETCONNECT_PROJECT_ID` optionally enables WalletConnect at build time. Neither variable is required. Build-time frontend values are public in the static bundle.
+
+Injected wallets are discovered through EIP-6963; generic injection also works in wallet app browsers. The connect sheet includes Coinbase, phone links to MetaMask/Coinbase/Phantom and instructions for Rabby's browser. No wallet approval is requested for ETH bets or claims. The wallet offers Ethereum switching when on another chain.
+
+Both canonical ABI hashes were checked against the handoff. Before transactions are enabled, the app checks chain ID and deployed runtime fingerprints for both contracts, normalizing compiler-declared immutable locations, then checks router/vault/pool wiring. Every send is simulated at a fresh gas price; confirmation, rejection, contract failure and replacement hashes are handled. The app never signs automatically.
+
+**Observed deployment limitation:** the live vault had an unset router and 0 IMD during validation. Its runtime was verified, but deposits and spins remain disabled until its owner completes router setup. The info tab shows the IMD top-up warning. This assignment makes no onchain configuration changes. See `artifacts/live-check.json` for the block and public-chain readings. The app will pick up setup changes on its next poll.
+
+## Data and checks
+
+`web/src/chain.ts` owns reads, metadata, simulations and receipt tracking. Vault logs are fetched from the deployment block in adaptive chunks, cached by chain/address with guarded localStorage, and refreshed every 12 seconds. Twelve overlapping blocks are replaced each pass for short reorgs. Each SpinRequested event has its own history row, price, time and transaction link, including retries after a refund; the detail sheet keeps the entire round timeline. Entries are ordered by spin block, so an older round spinning later still appears first. Historical events retain settlement totals after claims burn shares. Claimable amounts come directly from `claimable(roundId, wallet)` and are shown without rounding. A failed RPC leaves clearly marked last-read data and a retry control; writes stop after 60 seconds without a successful refresh.
+
+NFT identities come from FWAV2 listings. ERC-721 metadata uses tokenURI and three IPFS gateways; CryptoPunks use the brief's CryptoPunksData SVG contract. Metadata failures retain local placeholder art. The site makes no external oracle HTTP call and has no backend.
+
+Actual results and review coverage are in [artifacts/VALIDATION.md](artifacts/VALIDATION.md); final tokens/components are in [DESIGN.md](DESIGN.md). Production build, typecheck, model tests, browser interactions, mocked wallet transactions, the pinned 16-check design probe and Lighthouse accessibility were run. Mainnet transactions were not signed; WebKit and native-device/screen-reader checks remain unperformed.
+
+Optional browser checks use externally installed tooling, never a vendored registry:
+
+```sh
+npm install --prefix /tmp/keel-checks playwright @axe-core/playwright
+PLAYWRIGHT_BROWSERS_PATH=/tmp/keel-browsers /tmp/keel-checks/node_modules/.bin/playwright install chromium
+# Keep the production preview running in another terminal, then:
+PLAYWRIGHT_BROWSERS_PATH=/tmp/keel-browsers node web/tests/interface.browser.mjs /tmp/keel-checks/node_modules/playwright/index.mjs /tmp/keel-checks/node_modules/@axe-core/playwright/dist/index.js
+forge build --out test/scratch/contracts --cache-path test/scratch/foundry-cache
+PLAYWRIGHT_BROWSERS_PATH=/tmp/keel-browsers web/node_modules/.bin/tsx web/tests/transactions.browser.mjs /tmp/keel-checks/node_modules/playwright/index.mjs
+```
+
+The wallet transaction test intercepts every Ethereum request and never broadcasts. For regenerating ABI fingerprints after a deliberate source update, the Forge artifact command above prepares the inputs for `npm --prefix web run verify:handoff`; it fails on any handoff ABI hash mismatch. The copied handoff must only be replaced with a new verified deployment handoff. A separate read-only public-chain check is `node web/scripts/check-live.mjs`.
+
+## Existing contract project
+
 Ethereum mainnet contracts for small ETH bets pooled into one FWAV2 acquisition per round. `KeelSpinVault` owns the acquisition, refund credit and NFT settlement rights. `KeelFwaRouter` is the acquisition caller and earns FWA builder revenue.
 
 ## Build and checks

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "launchId": "95b27707-8a97-4d4c-9f29-171db0cdbc2b",
+  "chainId": 1,
+  "repoUrl": "https://github.com/identity-md-launches/launch-2164-build-keel-spin-foundry",
+  "sourceCommit": "f976be859d659c91490fac519ea397e7ed398f7f",
+  "attestationHash": "321da38c4b23c37fb7fa314d4daa48f5d711855ca719fe06ccac0779ba81f5e1",
+  "manifest": {
+    "kind": "evm_contracts",
+    "contracts": [
+      {
+        "contract": "KeelSpinVault",
+        "constructorArgs": [
+          "$owner",
+          "0x958C41181182e76F221331b2755b77D9e1426A98",
+          "0xaA4D9009a4664604b57644bF13e447E9036727DC",
+          "0xa43e6f75ee006411f79ac1c84120606c2330de82",
+          "0xd34a99bc0f67ae1bbd63c660e6d0b0dd03e263b7",
+          "0x5598aa9146215bc13eb26f2c692ad1461fd32982",
+          "$owner"
+        ]
+      },
+      {
+        "contract": "KeelFwaRouter",
+        "constructorArgs": [
+          "$owner",
+          "$contract:KeelSpinVault",
+          "0x958C41181182e76F221331b2755b77D9e1426A98"
+        ]
+      }
+    ],
+    "notes": "Ethereum mainnet Keel Spin: deploy KeelSpinVault first, then KeelFwaRouter referencing the vault. Both owners and the initial teamWallet are $owner. The vault pools ETH bets, settles FWAV2 NFT acquisitions and distributes round proceeds through pull claims. The router purchases only for the vault and directs builder revenue to teamWallet. After deployment, the owner calls vault.setRouter(router) before betting can begin. The oracle signer matches the attester published at https://api.imd.fun/oracle/requests?limit=1. The owner configures the published FWA transfer helper through router.setTransferHelper before claiming builder token rewards."
+  },
+  "contracts": [
+    {
+      "name": "KeelSpinVault",
+      "address": "0x3255347a4f5a1c571a217a7ec9a4b9e520857c49",
+      "txHash": "0xe4b42562e1af6ae778b3955e2bae7ab33551b15d9d0a832daeda88aabf72b6a6",
+      "blockNumber": 26219918,
+      "creationCodeHash": "494d4d011041e74ddec842235e6fe957006a7765a535bedbf57b37d768df2d99",
+      "abiHash": "e148d719fa2a3e46fb6d3e83ff7e2a799e6ae33481a12d34d12c865c6c27cba0"
+    },
+    {
+      "name": "KeelFwaRouter",
+      "address": "0xc9a47781e3e50a3161d81b5d4c05b2058e318a98",
+      "txHash": "0xe4b42562e1af6ae778b3955e2bae7ab33551b15d9d0a832daeda88aabf72b6a6",
+      "blockNumber": 26219918,
+      "creationCodeHash": "b25614a57a38e6937f9a5f8df9f54c1dd70ed0110db71d28b71722db0c3936b1",
+      "abiHash": "1089d17e3ca01ed0a532b200b7710bcac0192022d668384c4338e35a38e745c0"
+    }
+  ],
+  "abiInstructions": "Build ABIs from this exact source commit; compare canonicalKeccak(abi) with abiHash. Verify deployed code on the stated chain before enabling transactions."
+}
