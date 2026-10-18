@@ -30,11 +30,11 @@ Both canonical ABI hashes were checked against the handoff. Before transactions 
 
 ## Data and checks
 
-`web/src/chain.ts` owns reads, metadata, simulations and receipt tracking. Vault logs are fetched from the deployment block in adaptive chunks, cached by chain/address with guarded localStorage, and refreshed every 12 seconds. Twelve overlapping blocks are replaced each pass for short reorgs. Each SpinRequested event has its own history row, price, time and transaction link, including retries after a refund; the detail sheet keeps the entire round timeline. Entries are ordered by spin block, so an older round spinning later still appears first. Historical events retain settlement totals after claims burn shares. Claimable amounts come directly from `claimable(roundId, wallet)` and are shown without rounding. A failed RPC leaves clearly marked last-read data and a retry control; writes stop after 60 seconds without a successful refresh.
+`web/src/chain.ts` owns reads, metadata, simulations and receipt tracking. Vault logs are fetched from the deployment block in adaptive chunks, cached by chain/address with guarded localStorage, and refreshed every 12 seconds. Twelve overlapping blocks are replaced each pass for short reorgs. Each SpinRequested event has its own history row, price, time and transaction link, including retries after a refund; the detail sheet keeps the entire round timeline. Entries are ordered by spin block, so an older round spinning later still appears first. Historical events retain settlement totals after claims burn shares. Claimable amounts come directly from `claimable(roundId, wallet)` and are shown without rounding. A failed RPC leaves clearly marked last-read data and a retry control; before any successful snapshot, history stays unavailable with an unknown count. Writes stop after 60 seconds without a successful refresh. Simulation and pending transaction notices remain tracked and cannot be dismissed until confirmed or failed.
 
 NFT identities come from FWAV2 listings. ERC-721 metadata uses tokenURI and three IPFS gateways; CryptoPunks use the brief's CryptoPunksData SVG contract. Metadata failures retain local placeholder art. The site makes no external oracle HTTP call and has no backend.
 
-Actual results and review coverage are in [artifacts/VALIDATION.md](artifacts/VALIDATION.md); final tokens/components are in [DESIGN.md](DESIGN.md). Production build, typecheck, model tests, browser interactions, mocked wallet transactions, the pinned 16-check design probe and Lighthouse accessibility were run. Mainnet transactions were not signed; WebKit and native-device/screen-reader checks remain unperformed.
+Revision results and the six-domain review are in [docs/WEB-VALIDATION.md](docs/WEB-VALIDATION.md); final tokens/components are in [DESIGN.md](DESIGN.md). Finding-by-finding responses are in [.imd-responses.json](.imd-responses.json). Production build, typecheck, model tests, browser interactions, mocked wallet transactions, the pinned 16-check design probe and Lighthouse accessibility were run. Mainnet transactions were not signed; WebKit and native-device/screen-reader checks remain unperformed.
 
 Optional browser checks use externally installed tooling, never a vendored registry:
 
@@ -43,11 +43,12 @@ npm install --prefix /tmp/keel-checks playwright @axe-core/playwright
 PLAYWRIGHT_BROWSERS_PATH=/tmp/keel-browsers /tmp/keel-checks/node_modules/.bin/playwright install chromium
 # Keep the production preview running in another terminal, then:
 PLAYWRIGHT_BROWSERS_PATH=/tmp/keel-browsers node web/tests/interface.browser.mjs /tmp/keel-checks/node_modules/playwright/index.mjs /tmp/keel-checks/node_modules/@axe-core/playwright/dist/index.js
+PLAYWRIGHT_BROWSERS_PATH=/tmp/keel-browsers node web/tests/revision.browser.mjs /tmp/keel-checks/node_modules/playwright/index.mjs /tmp/keel-checks/node_modules/@axe-core/playwright/dist/index.js
 forge build --out test/scratch/contracts --cache-path test/scratch/foundry-cache
 PLAYWRIGHT_BROWSERS_PATH=/tmp/keel-browsers web/node_modules/.bin/tsx web/tests/transactions.browser.mjs /tmp/keel-checks/node_modules/playwright/index.mjs
 ```
 
-The wallet transaction test intercepts every Ethereum request and never broadcasts. For regenerating ABI fingerprints after a deliberate source update, the Forge artifact command above prepares the inputs for `npm --prefix web run verify:handoff`; it fails on any handoff ABI hash mismatch. The copied handoff must only be replaced with a new verified deployment handoff. A separate read-only public-chain check is `node web/scripts/check-live.mjs`.
+The wallet transaction test intercepts every Ethereum request and never broadcasts. It holds simulation and receipt responses to check the payment lock, then checks successful empty reads and retention after an outage. The revision test checks accessible history labels, readable timeline values, retry/error states and responsive navigation. These scripts write their results to `test/scratch/`; create that directory before running them. For regenerating ABI fingerprints after a deliberate source update, the Forge artifact command above prepares the inputs for `npm --prefix web run verify:handoff`; it fails on any handoff ABI hash mismatch. The copied handoff must only be replaced with a new verified deployment handoff. A separate read-only public-chain check is `node web/scripts/check-live.mjs`.
 
 ## Existing contract project
 

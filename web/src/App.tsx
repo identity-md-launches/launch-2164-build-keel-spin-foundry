@@ -33,7 +33,9 @@ import {
   spinReason,
   spinHistory,
   type SpinEntry,
+  type ChainEvent,
   status,
+  stateLabel,
   State,
   type Round,
   type Snapshot,
@@ -78,7 +80,9 @@ function Time({ timestamp, now }: { timestamp?: number; now: number }) {
       dateTime={new Date(timestamp * 1000).toISOString()}
       title={new Date(timestamp * 1000).toUTCString()}
     >
-      {relative(timestamp, now)}
+      {timestamp > now
+        ? `in ${countdown(timestamp - now)}`
+        : relative(timestamp, now)}
     </time>
   ) : (
     <span>—</span>
@@ -138,6 +142,7 @@ export default function App() {
     if (!isDemo) setWallet(address);
   }, [address]);
   const current = s?.rounds.find((r) => r.id === s.currentId);
+  const historyUnavailable = !s && !!live.error;
   const spins = useMemo(() => spinHistory(s?.rounds ?? []), [s]);
   const latest = spins[0];
   const joined =
@@ -706,13 +711,17 @@ export default function App() {
                     ) : (
                       <Empty
                         title={
-                          live.loading
-                            ? "finding the latest spin"
+                          !s
+                            ? historyUnavailable
+                              ? "latest spin unavailable"
+                              : "finding the latest spin"
                             : "a quiet start"
                         }
                       >
-                        {live.loading
-                          ? "Reading the vault’s events."
+                        {!s
+                          ? historyUnavailable
+                            ? "Retry the Ethereum connection."
+                            : "Reading the vault’s events."
                           : "The first spin will appear here when a funded round spins."}
                       </Empty>
                     )}
@@ -757,11 +766,17 @@ export default function App() {
                 ) : (
                   <div className="quiet-row">
                     <span className="muted">
-                      {live.loading
-                        ? "Reading spin events…"
+                      {!s
+                        ? historyUnavailable
+                          ? "Spin history unavailable."
+                          : "Reading spin events…"
                         : "No spins recorded yet."}
                     </span>
-                    <span className="muted">all rounds live here</span>
+                    <span className="muted">
+                      {historyUnavailable
+                        ? "Retry the Ethereum connection."
+                        : "all rounds live here"}
+                    </span>
                   </div>
                 )}
               </section>
@@ -785,11 +800,25 @@ export default function App() {
               </div>
               <div className="feed-header">
                 <span>
-                  {history.length} {history.length === 1 ? "spin" : "spins"}
+                  {s ? history.length : "—"}{" "}
+                  {s && history.length === 1 ? "spin" : "spins"}
                 </span>
                 <span>newest first</span>
               </div>
-              {filter === "mine" && !address && !isDemo ? (
+              {!s ? (
+                <Empty
+                  title={
+                    historyUnavailable
+                      ? "spin history unavailable"
+                      : "reading the full history"
+                  }
+                >
+                  {historyUnavailable
+                    ? "Retry the Ethereum connection."
+                    : (live.progress ??
+                      "Reading vault events from the deployment block.")}
+                </Empty>
+              ) : filter === "mine" && !address && !isDemo ? (
                 <Empty title="your spins live here">
                   Connect a wallet to filter the feed to your rounds.{" "}
                   <button
@@ -844,17 +873,8 @@ export default function App() {
                   </div>
                 </>
               ) : (
-                <Empty
-                  title={
-                    live.loading
-                      ? "reading the full history"
-                      : "no spins here yet"
-                  }
-                >
-                  {live.loading
-                    ? (live.progress ??
-                      "Reading vault events from the deployment block.")
-                    : "Try another filter or come back after the next spin."}
+                <Empty title="no spins here yet">
+                  Try another filter or come back after the next spin.
                 </Empty>
               )}
             </section>
@@ -1051,6 +1071,7 @@ export default function App() {
           <button
             className="icon-button"
             aria-label="dismiss transaction status"
+            disabled={pending}
             onClick={() => setTx(undefined)}
           >
             <Icon name="close" size={18} />
@@ -1079,11 +1100,7 @@ function HistoryRow({
 }) {
   return (
     <article className="history-row">
-      <button
-        className="history-main"
-        onClick={onOpen}
-        aria-label={`view round ${r.id}, ${status(r)}`}
-      >
+      <button className="history-main" onClick={onOpen}>
         <NFTArt image={r.nft?.image} name={r.nft?.name} small />
         <span className="history-name">
           <span className="row-title">
@@ -1140,6 +1157,41 @@ function HistoryRow({
       </div>
     </article>
   );
+}
+const eventAmounts: Record<string, readonly string[]> = {
+  BetPlaced: ["amount", "shares"],
+  Withdrawn: ["amount", "shares"],
+  SpinRequested: ["quote", "reward", "refund"],
+  AcquisitionRefunded: ["refund", "remainingCash"],
+  OracleValueStored: ["netOffer"],
+  Decision: ["ethBid", "netOffer"],
+  SaleProceeds: ["amount"],
+  RoundSettled: ["distributable", "fee"],
+  Claimed: ["amount"],
+};
+function EventValue({
+  eventName,
+  field,
+  value,
+  now,
+}: {
+  eventName: string;
+  field: string;
+  value: ChainEvent["args"][string];
+  now: number;
+}) {
+  if (eventAmounts[eventName]?.includes(field))
+    return <Amount value={BigInt(value)} />;
+  if (
+    (eventName === "AllocationRecorded" && field === "deadline") ||
+    (eventName === "OracleValueStored" && field === "expiresAt")
+  )
+    return <Time timestamp={Number(value)} now={now} />;
+  if (eventName === "RoundStateChanged" && field === "state")
+    return stateLabel(Number(value)) || "not started";
+  if (eventName === "Decision" && field === "path")
+    return pathLabel(Number(value)) ?? "unknown";
+  return typeof value === "boolean" ? (value ? "yes" : "no") : String(value);
 }
 function RoundDetail({
   round: r,
@@ -1237,7 +1289,12 @@ function RoundDetail({
                   <div key={k}>
                     <dt>{k.replace(/([A-Z])/g, " $1").toLowerCase()}</dt>
                     <dd>
-                      {typeof v === "boolean" ? (v ? "yes" : "no") : String(v)}
+                      <EventValue
+                        eventName={e.eventName}
+                        field={k}
+                        value={v}
+                        now={now}
+                      />
                     </dd>
                   </div>
                 ))}

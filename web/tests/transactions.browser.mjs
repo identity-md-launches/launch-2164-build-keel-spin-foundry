@@ -36,11 +36,17 @@ let sent = 0,
   reject = false,
   simulationError = false,
   claimReadValue = 12345678901234567n,
-  receiptReady = false;
+  receiptReady = false,
+  emptyHistory = false,
+  readFailure = false;
 const calls = [];
 let unlockReceipt;
 const receiptGate = new Promise((resolve) => {
   unlockReceipt = resolve;
+});
+let unlockSimulation;
+const simulationGate = new Promise((resolve) => {
+  unlockSimulation = resolve;
 });
 function result(abi2, functionName, value) {
   return encodeFunctionResult({ abi: abi2, functionName, result: value });
@@ -71,6 +77,7 @@ const block = {
 };
 async function rpc(req) {
   calls.push({ method: req.method });
+  if (readFailure) throw new Error("review unavailable");
   switch (req.method) {
     case "eth_chainId":
       return "0x1";
@@ -96,6 +103,7 @@ async function rpc(req) {
         number: req.params[0] === "latest" ? block.number : req.params[0],
       };
     case "eth_getLogs": {
+      if (emptyHistory) return [];
       const filter = req.params[0];
       return allEvents
         .filter(
@@ -164,6 +172,7 @@ async function rpc(req) {
         throw new Error("metadata is intentionally unavailable in this test");
       if (f in values) return result(contractABI, f, values[f]);
       if (["bet", "spin", "claim", "withdraw"].includes(f)) {
+        if (f === "bet") await simulationGate;
         if (simulationError)
           return {
             rpcError: {
@@ -309,9 +318,31 @@ try {
   passed.push("invalid bet is blocked with an inline error");
   await page.locator("#bet").fill("0.01");
   await page.getByRole("button", { name: "add ETH", exact: false }).click();
+  await page.getByText("checking transaction…", { exact: true }).waitFor();
+  const dismiss = page.getByRole("button", {
+    name: "dismiss transaction status",
+  });
+  assert.ok(await dismiss.isDisabled());
+  await dismiss.evaluate((button) => button.click());
+  assert.equal(await page.locator(".tx-status").count(), 1);
+  assert.ok(await page.locator('button[type="submit"]').isDisabled());
+  assert.equal(sent, 0);
+  passed.push("simulation status cannot be dismissed or unlock another payment");
+  unlockSimulation();
   await page.getByText("transaction pending", { exact: true }).waitFor();
   assert.equal(sent, 1);
   passed.push("bet is simulated, then sent, then shown pending");
+  assert.ok(await dismiss.isDisabled());
+  await dismiss.evaluate((button) => button.click());
+  assert.equal(await page.locator(".tx-status").count(), 1);
+  assert.ok(await page.locator('button[type="submit"]').isDisabled());
+  await page.locator('button[type="submit"]').evaluate((button) => button.click());
+  assert.equal(sent, 1);
+  assert.equal(
+    await page.locator(".tx-status a").getAttribute("href"),
+    `https://etherscan.io/tx/${hash}`,
+  );
+  passed.push("pending status, explorer link and payment lock survive dismissal attempts");
   const sendIndex = calls.findIndex((c) => c.functionName === "bet");
   assert.ok(sendIndex >= 0);
   receiptReady = true;
@@ -326,6 +357,7 @@ try {
     (await page.locator(".tx-status a").getAttribute("href")) ===
       `https://etherscan.io/tx/${hash}`,
   );
+  assert.ok(await dismiss.isEnabled());
   await page
     .getByRole("button", { name: "dismiss transaction status" })
     .click();
@@ -383,6 +415,7 @@ try {
     .waitFor();
   assert.equal(sent, 3);
   passed.push("wallet rejection is a recoverable failed state");
+  assert.ok(await dismiss.isEnabled());
   await page
     .getByRole("button", { name: "dismiss transaction status" })
     .click();
@@ -398,6 +431,22 @@ try {
   passed.push(
     "decoded simulation errors prevent the wallet send and explain the contract failure",
   );
+  emptyHistory = true;
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.getByText("round #32", { exact: true }).waitFor();
+  assert.ok(await page.getByText("No spins recorded yet.", { exact: true }).isVisible());
+  assert.ok(await page.getByText("a quiet start", { exact: true }).isVisible());
+  await page.locator('.bottom-nav a[href="#history"]').click();
+  assert.ok((await page.locator(".feed-header").innerText()).startsWith("0 spins"));
+  assert.ok(await page.getByText("no spins here yet", { exact: true }).isVisible());
+  passed.push("a successful empty snapshot still shows a verified zero and empty states");
+  readFailure = true;
+  await page.getByText("chain connection interrupted", { exact: true }).waitFor({ timeout: 25000 });
+  assert.ok((await page.locator(".feed-header").innerText()).startsWith("0 spins"));
+  assert.ok(await page.getByText("no spins here yet", { exact: true }).isVisible());
+  assert.equal(await page.getByText("spin history unavailable", { exact: true }).count(), 0);
+  passed.push("later read failure retains the last successful snapshot with its connection warning");
   await writeFile(
     "test/scratch/transaction-results.json",
     JSON.stringify(

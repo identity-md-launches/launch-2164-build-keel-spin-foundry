@@ -24,7 +24,7 @@ Source: `web/src/style.css`; composition: `web/src/App.tsx`. The chrome fawn and
 | `--error` | `#f1a6a0` | Validation and transaction failure text |
 | `--focus` | `#d9eccb` | Two-pixel keyboard focus outline |
 
-Warnings use a separate dark amber background, `#211f15`. Status always includes words. The final probe measured rendered first-screen contrast against its actual solid backgrounds; all measured pairs passed its WCAG AA thresholds. Lighthouse and axe results are in `artifacts/`. This is a dark-only interface; an unrequested light theme is deliberately absent.
+Warnings use a separate dark amber background, `#211f15`. Status always includes words. The final probe measured rendered first-screen contrast against its actual solid backgrounds; all measured pairs passed its WCAG AA thresholds. Lighthouse and axe results and limitations are recorded in `docs/WEB-VALIDATION.md`. This is a dark-only interface; an unrequested light theme is deliberately absent.
 
 ## Typography
 
@@ -51,13 +51,13 @@ Panels use 16px corners; controls 8px; metadata badges 5px; NFT thumbnails 7px; 
 ## Components
 
 - `Amount`, `Time`, `ELink` in `App.tsx`: consistent monetary display, relative time with exact UTC on hover, and Etherscan transaction links.
-- `HistoryRow`: a native button opens the detail sheet; separate sale and explorer links remain independent. Decision path, cost, outcome and return share a stable row structure. Each acquisition attempt has a distinct row keyed by its transaction and log index; a refund followed by another spin never collapses into one entry.
-- `RoundDetail`: complete round event timeline with every decoded argument, transaction hash link and block.
-- `Empty`, `Fawn`, `NFTArt`: restrained empty/loading visuals and local fallback art. NFT metadata is never required to navigate or claim.
+- `HistoryRow`: a native button opens the detail sheet and takes its accessible name from the visible NFT, token, round and outcome text; separate sale and explorer links remain independent. Decision path, cost, outcome and return share a stable row structure. Each acquisition attempt has a distinct row keyed by its transaction and log index; a refund followed by another spin never collapses into one entry.
+- `RoundDetail` and `EventValue`: complete round event timeline with every decoded argument, transaction hash link and block. Event-specific ETH fields reuse `Amount`, deadlines and oracle expiry reuse `Time` (past relative time or future countdown, exact UTC on hover), and vault state/decision path values use shared plain labels. Token/listing/request IDs, addresses and hashes keep their full values.
+- `Empty`, `Fawn`, `NFTArt`: restrained empty/loading visuals and local fallback art. History and latest-spin empty copy requires a successful snapshot; an initial connection error shows unavailable copy and an unknown history count. NFT metadata is never required to navigate or claim.
 - `Dialog` in `components/Dialog.tsx`: native `showModal()`, inert background, Escape and backdrop close, initial focus and focus restoration.
 - `WalletControl` and `WalletSheet`: one header control, named EIP-6963 providers first, generic browser provider when needed, mobile wallet-browser links and Coinbase. WalletConnect appears only with a build-time project ID. Mobile injected providers stay available.
 - `.button.primary`: the deposit action; `.button.spin-button` and `.button` are secondary. Controls define hover, focus, pressed, disabled and pending states. Native progress and labelled input elements carry semantics.
-- `.tx-status`: persistent simulation, pending, confirmed and failed feedback with a transaction link when known. Errors use plain recoverable messages.
+- `.tx-status`: persistent simulation, pending, confirmed and failed feedback with a transaction link when known. Dismissal is disabled during simulation and pending confirmation, preserving the payment lock and progress link. Confirmed or failed notices can be dismissed. Errors use plain recoverable messages.
 
 A short allocation reveal uses opacity and an 8px translation over 550ms. Pressed buttons scale to 0.96 only with no reduced-motion preference. The reduced-motion rule removes animations and transitions. No animation repeats indefinitely.
 

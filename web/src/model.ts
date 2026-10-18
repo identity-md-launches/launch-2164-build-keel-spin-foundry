@@ -237,6 +237,17 @@ export function betError(value: string, min: bigint): string | undefined {
   }
 }
 export const short = (s: string) => `${s.slice(0, 6)}…${s.slice(-4)}`;
+export const stateLabel = (state: State) =>
+  [
+    "",
+    "open",
+    "waiting for randomness",
+    "deciding",
+    "oracle pending",
+    "oracle done",
+    "awaiting sale",
+    "settled",
+  ][state] ?? "unknown";
 export const status = (
   r: Pick<Round, "state" | "kept" | "sale" | "nftForwarded"> & {
     refunded?: boolean;
@@ -252,15 +263,7 @@ export const status = (
           : "took ETH bid"
       : r.state === State.AwaitingSale && !r.nftForwarded
         ? "kept nft"
-        : ([
-            "",
-            "open",
-            "waiting for randomness",
-            "deciding",
-            "oracle pending",
-            "oracle done",
-            "awaiting sale",
-          ][r.state] ?? "unknown");
+        : stateLabel(r.state);
 export const pathLabel = (path: Path) =>
   ["pending", "pre-check", "oracle", "fallback", "fallback", "external"][path];
 export const returnRate = (r: Round) =>
