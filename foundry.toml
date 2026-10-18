@@ -1,0 +1,21 @@
+[profile.default]
+src = "src"
+test = "test"
+libs = ["lib"]
+solc = "0.8.26"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 800
+via_ir = true
+bytecode_hash = "none"
+cbor_metadata = false
+remappings = ["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/", "forge-std/=lib/forge-std/src/"]
+
+[profile.default.fuzz]
+runs = 128
+seed = "0x742c30e652373c765963716e572266856c5215a4a7898aa0509e582b93fec513"
+
+[profile.default.invariant]
+runs = 64
+depth = 64
+fail_on_revert = false

@@ -1,0 +1,31 @@
+{
+  "input": {
+    "action": "oracle.request",
+    "input": {
+      "question": "What is the highest live offer, in wei, that the owner of 0xb47e3cd837ddf8e4c57f05d70ab865de6e193bbb token 1 could accept right now, after marketplace fees and creator royalties?",
+      "answerType": "uint256",
+      "panelSize": 5,
+      "evidence": "panel",
+      "chainId": 1,
+      "toleranceBps": 500
+    }
+  },
+  "result": {
+    "action": "oracle.request",
+    "blockers": [],
+    "suggestions": [
+      {
+        "code": "wording",
+        "detail": "It may be read more than one way. Naming the period, the unit or the term you mean makes a split less likely."
+      },
+      {
+        "code": "not_answerable",
+        "detail": "No one can answer this from public sources today: it may ask about the future, a matter of opinion, or something that is not public."
+      },
+      {
+        "code": "evidence",
+        "detail": "This reads as answered from blockchain data; you chose public sources."
+      }
+    ]
+  }
+}

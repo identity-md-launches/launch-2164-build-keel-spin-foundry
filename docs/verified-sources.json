@@ -1,0 +1,46 @@
+[
+  {
+    "contract": "FWAV2",
+    "chainId": 1,
+    "address": "0x958C41181182e76F221331b2755b77D9e1426A98",
+    "sourceURL": "https://sourcify.dev/server/v2/contract/1/0x958C41181182e76F221331b2755b77D9e1426A98?fields=all",
+    "match": "match",
+    "compilationTarget": "src/FWAV2/FWAV2.sol:FWAV2",
+    "sourceHashes": {
+      "src/FWAV2/FWAV2.sol": "1b5dbbe6a2c1d15e8df38c075da85036659aacb38936ccd94619b86a8240a425"
+    }
+  },
+  {
+    "contract": "CollectionFloorOracle",
+    "chainId": 1,
+    "address": "0xaA4D9009a4664604b57644bF13e447E9036727DC",
+    "sourceURL": "https://sourcify.dev/server/v2/contract/1/0xaA4D9009a4664604b57644bF13e447E9036727DC?fields=all",
+    "match": "match",
+    "compilationTarget": "src/FWAV2/CollectionFloorOracle.sol:CollectionFloorOracle",
+    "sourceHashes": {
+      "src/FWAV2/CollectionFloorOracle.sol": "8d46f5ebd6245dd1102d43bfd6706eab24faf18ad2b20d3b9381f6de0e9e24b5"
+    }
+  },
+  {
+    "contract": "Intake",
+    "chainId": 1,
+    "address": "0xa43e6F75ee006411F79Ac1C84120606C2330DE82",
+    "sourceURL": "https://sourcify.dev/server/v2/contract/1/0xa43e6F75ee006411F79Ac1C84120606C2330DE82?fields=all",
+    "match": "match",
+    "compilationTarget": "src/Intake.sol:Intake",
+    "sourceHashes": {
+      "src/Intake.sol": "e182cadac8c65d9f8dc0d637654e41bb05d6c124eaad49a180380c0c457d4ee9"
+    }
+  },
+  {
+    "contract": "IMD",
+    "chainId": 1,
+    "address": "0xD34a99Bc0f67aE1bbd63C660e6d0b0dd03E263B7",
+    "sourceURL": "https://sourcify.dev/server/v2/contract/1/0xD34a99Bc0f67aE1bbd63C660e6d0b0dd03E263B7?fields=all",
+    "match": "exact_match",
+    "compilationTarget": "src/BridgedFP.sol:BridgedFP",
+    "sourceHashes": {
+      "src/BridgedFP.sol": "30cf0a98d8e56a63036b672f810e34e32ddb6335e4f2c03ec79713b3cd8931ad"
+    }
+  }
+]
