@@ -69,7 +69,7 @@ interface IIntake {
 
 interface IKeelVault {
     function teamWallet() external view returns (address);
-    function totalSharesOutstanding() external view returns (uint256);
+    function unresolvedShares() external view returns (uint256);
 }
 
 interface IKeelRouter {

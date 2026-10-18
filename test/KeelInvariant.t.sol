@@ -82,7 +82,7 @@ contract RoundHandler is Test {
         if (vault.rounds(id).state != KeelSpinVault.State.Allocated) return;
         floor.set(keep ? 30 ether : 0.5 ether, block.timestamp);
         // Short window triggers fallback immediately and avoids waiting in stateful runs.
-        pool.setWindow(1 hours);
+        pool.setWindow(20 minutes);
         vault.requestDecision(id);
     }
 
@@ -126,10 +126,14 @@ contract KeelInvariantTest is KeelBase {
         uint256 liability;
         uint256 allCash;
         uint256 shares;
+        uint256 unresolved;
         for (uint256 id = 1; id <= vault.roundCount(); ++id) {
             KeelSpinVault.Round memory r = vault.rounds(id);
             allCash += r.cash;
             shares += r.totalShares;
+            if (r.state != KeelSpinVault.State.AwaitingSale && r.state != KeelSpinVault.State.Settled) {
+                unresolved += r.totalShares;
+            }
             if (r.state == KeelSpinVault.State.Open) liability += r.cash;
             uint256 actorShares;
             for (uint256 j; j < 12; ++j) {
@@ -141,6 +145,7 @@ contract KeelInvariantTest is KeelBase {
         assertLe(liability, address(vault).balance);
         assertEq(allCash + vault.feeCredit(team), vault.accountedETH());
         assertEq(shares, vault.totalSharesOutstanding());
+        assertEq(unresolved, vault.unresolvedShares());
         assertLe(vault.accountedETH(), address(vault).balance);
     }
 

@@ -232,6 +232,62 @@ contract KeelSettlementTest is KeelBase {
         assertEq(address(vault).balance, 0);
     }
 
+    function testStrandedKeptNFTReleasesCashAfterGraceAndStaysForwardable() public {
+        RejectNFT recipient = new RejectNFT();
+        vault.setTeamWallet(address(recipient));
+        uint256 id = _ready();
+        floor.set(30 ether, block.timestamp);
+        vault.requestDecision(id);
+        _state(id, KeelSpinVault.State.AwaitingSale);
+        // The collection now halts transfers out of the vault for good.
+        nft.setRejectTransfers(true);
+        vault.forwardNFT(id);
+        assertEq(nft.ownerOf(1), address(vault));
+        assertFalse(vault.rounds(id).nftForwarded);
+        uint256 buffer = vault.rounds(id).cash;
+        uint256 grace = vault.rounds(id).allocatedAt + 30 days;
+        vm.warp(grace - 1);
+        assertFalse(vault.nftStranded(id));
+        vm.expectRevert(KeelSpinVault.WrongState.selector);
+        vault.depositSaleProceeds{value: 1}(id, keccak256("stranded"));
+        vm.warp(grace);
+        assertTrue(vault.nftStranded(id));
+        vault.depositSaleProceeds{value: 1}(id, keccak256("stranded"));
+        _state(id, KeelSpinVault.State.Settled);
+        assertEq(vault.claimable(id, alice), buffer + 1);
+        vm.prank(alice);
+        vault.claim(id);
+        nft.setRejectTransfers(false);
+        recipient.setReject(false);
+        vault.forwardNFT(id);
+        assertEq(nft.ownerOf(1), address(recipient));
+        assertTrue(vault.rounds(id).nftForwarded);
+        assertFalse(vault.nftStranded(id));
+        _solvent();
+    }
+
+    function testForwardNFTRejectsEthSettledRound() public {
+        uint256 id = _ready();
+        floor.set(0.5 ether, block.timestamp);
+        _fallback(id);
+        _state(id, KeelSpinVault.State.Settled);
+        vm.expectRevert(KeelSpinVault.WrongState.selector);
+        vault.forwardNFT(id);
+    }
+
+    function testFeeAppliesToBidNotUnsolicitedEth() public {
+        vault.setFeeBps(300);
+        uint256 id = _ready();
+        uint256 buffer = vault.rounds(id).cash;
+        (bool sent,) = address(vault).call{value: 1 ether}("");
+        assertTrue(sent);
+        floor.set(0.5 ether, block.timestamp);
+        _fallback(id);
+        assertEq(vault.feeCredit(team), 0.027 ether);
+        assertEq(vault.claimable(id, alice), buffer + 1.9 ether - 0.027 ether);
+        _solvent();
+    }
+
     function testUnsolicitedEthCannotBeSweptAndBenefitsResolvingRound() public {
         uint256 id = _ready();
         uint256 buffer = vault.rounds(id).cash;

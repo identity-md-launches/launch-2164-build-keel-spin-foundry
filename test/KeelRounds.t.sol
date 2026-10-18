@@ -260,6 +260,55 @@ contract KeelRoundsTest is KeelBase {
         router.setPool(address(pool));
     }
 
+    function testUnclaimedSettledStakeDoesNotBlockMigration() public {
+        uint256 id = vault.currentRoundId();
+        _bet(bob, 0.001 ether);
+        _bet(alice, vault.liveTarget() - 0.001 ether);
+        _spin(id);
+        _allocate(id);
+        floor.set(0.5 ether, block.timestamp);
+        _fallback(id);
+        _state(id, KeelSpinVault.State.Settled);
+        vm.prank(alice);
+        vault.claim(id);
+        assertEq(vault.activeRoundId(), 0);
+        assertGt(vault.stake(id, bob), 0);
+        assertGt(vault.totalSharesOutstanding(), 0);
+        assertEq(vault.unresolvedShares(), 0);
+        MockFWA newPool = new MockFWA();
+        KeelFwaRouter newRouter = new KeelFwaRouter(address(this), address(vault), address(newPool));
+        vault.setFwa(address(newPool));
+        vault.setRouter(address(newRouter));
+        router.setPool(address(newPool));
+        assertEq(address(vault.fwa()), address(newPool));
+        uint256 expected = vault.claimable(id, bob);
+        uint256 beforeBalance = bob.balance;
+        vm.prank(bob);
+        vault.claim(id);
+        assertEq(bob.balance - beforeBalance, expected);
+        assertEq(vault.totalSharesOutstanding(), 0);
+        _solvent();
+    }
+
+    function testAwaitingSaleStakeDoesNotBlockMigrationButOpenStakeDoes() public {
+        uint256 id = _ready();
+        floor.set(30 ether, block.timestamp);
+        vault.requestDecision(id);
+        _state(id, KeelSpinVault.State.AwaitingSale);
+        assertEq(vault.unresolvedShares(), 0);
+        MockFWA newPool = new MockFWA();
+        vault.setFwa(address(newPool));
+        _bet(bob, 0.001 ether);
+        assertEq(vault.unresolvedShares(), 0.001 ether);
+        vm.expectRevert(KeelSpinVault.OutstandingBets.selector);
+        vault.setFwa(address(pool));
+        uint256 openId = vault.currentRoundId();
+        vm.prank(bob);
+        vault.withdraw(openId);
+        assertEq(vault.unresolvedShares(), 0);
+        vault.setFwa(address(pool));
+    }
+
     function testFuzzUpTo500BettorsAndProRataConservation(uint16 countSeed, uint64 amountSeed) public {
         uint256 count = bound(countSeed, 1, 500);
         uint256 each = bound(uint256(amountSeed), 0.001 ether, 0.01 ether);

@@ -43,6 +43,7 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
         uint16 fee;
         bool nftForwarded;
         bool oracleFailed;
+        bool kept;
         address feeRecipient;
         address pool;
         address collection;
@@ -70,6 +71,9 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
     uint256 public roundCount;
     uint256 public activeRoundId;
     uint256 public totalSharesOutstanding;
+    /// @notice Shares of rounds that still depend on the FWA/router wiring: Open or unresolved. Settled and
+    /// AwaitingSale rounds only hold cash, so their unclaimed shares never block a migration.
+    uint256 public unresolvedShares;
     uint256 public accountedETH;
 
     IFWAV2 public fwa;
@@ -91,8 +95,11 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
     uint16 public haircutBps = 1500;
     uint16 public marginBps = 500;
     uint256 public maxFloorAge = 24 hours;
-    uint256 public safetyMargin = 2 hours;
-    uint256 public fallbackLead = 1 hours;
+    // The live FWAV2 settlementWindow is one hour, so the three timing settings must sum to less than that:
+    // decisionDeadline = allocatedAt + 50 min, fallbackAt = allocatedAt + 30 min, last paid ask at +20 min.
+    uint256 public safetyMargin = 10 minutes;
+    uint256 public fallbackLead = 20 minutes;
+    uint256 public minOracleLead = 10 minutes;
     bool public defaultKeep = true;
     bytes32 public oracleAction = bytes32("oracle.request@oracle-1");
     uint256 public oraclePrice = 0.5 ether;
@@ -102,6 +109,9 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
     uint256 private constant BPS = 10_000;
     uint256 private constant MAX_OFFER = 1e22;
     uint256 private constant MAX_ROUNDS_PER_BET = 32;
+    /// @dev After this long past allocation, a kept NFT the collection refuses to release no longer blocks the
+    /// round's cash: the team may settle the round, and the NFT stays forwardable whenever it becomes movable.
+    uint256 internal constant STRANDED_NFT_GRACE = 30 days;
 
     error InvalidAddress();
     error InvalidParameter();
@@ -166,6 +176,19 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
     event FeesClaimed(address indexed beneficiary, address indexed recipient, uint256 amount);
     event AddressSet(bytes32 indexed parameter, address value);
     event ParameterSet(bytes32 indexed parameter, uint256 value);
+    event BetParametersSet(uint256 minBet, uint16 maxBettors, uint16 bufferBps);
+    event SpinParametersSet(
+        uint256 spinReward, uint256 maxSpinGasPrice, uint256 minWeightedValue, uint16 maxNegativeSlippageBps
+    );
+    event DecisionParametersSet(
+        uint16 haircutBps,
+        uint16 marginBps,
+        uint256 maxFloorAge,
+        uint256 safetyMargin,
+        uint256 fallbackLead,
+        uint256 minOracleLead,
+        bool defaultKeep
+    );
     event DefinitionSet(uint256 indexed index, string value);
     event OraclePaymentSet(bytes32 action, uint256 price, uint256 lowBalanceThreshold);
     event ImdWithdrawn(address indexed recipient, uint256 amount);
@@ -245,6 +268,7 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
             stake[id][msg.sender] += shares;
             r.totalShares += shares;
             totalSharesOutstanding += shares;
+            unresolvedShares += shares;
             _credit(r, amount);
             remaining -= amount;
             emit BetPlaced(id, msg.sender, amount, shares);
@@ -318,8 +342,10 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
     }
 
     function _sync(uint256 id) internal {
-        if (activeRoundId != id || id == 0) revert WrongState();
         Round storage r = _rounds[id];
+        // A resolved round has nothing left to reconcile; callers may still retry the NFT forward.
+        if (r.state == State.AwaitingSale || r.state == State.Settled) return;
+        if (activeRoundId != id || id == 0) revert WrongState();
         IFWAV2 pool = IFWAV2(r.pool);
         IFWAV2.Acquisition memory a = pool.acquisitions(r.requestId);
         if (a.purchaser != address(this)) revert InvalidParameter();
@@ -401,7 +427,8 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
             _resolve(id, true, DecisionPath.ObviousFloor);
             return;
         }
-        if (r.oracleFailed || block.timestamp >= fallbackAt(id)) {
+        // A paid answer arrives minutes later and is refused at fallbackAt, so never pay when it cannot land.
+        if (r.oracleFailed || block.timestamp + minOracleLead > fallbackAt(id)) {
             _fallback(id);
             return;
         }
@@ -532,13 +559,15 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
         }
         _clearOracle(id);
         activeRoundId = 0;
+        unresolvedShares -= r.totalShares;
+        r.kept = keep;
         // A forced ETH transfer bypasses receive(). Reconcile actual cash after observing terminal FWA state.
         // Any unsolicited ETH also accrues to this resolving round; it cannot be swept by the owner.
         uint256 arrived = address(this).balance - accountedETH;
         _credit(r, arrived);
         emit Decision(id, r.collection, r.tokenId, r.ethBid, r.netOffer, keep, r.path);
         if (keep) _state(id, State.AwaitingSale);
-        else _settle(id, arrived);
+        else _settle(id, Math.min(arrived, r.ethBid)); // the fee base is the bid, never a donation
     }
 
     function _clearOracle(uint256 id) internal {
@@ -577,8 +606,15 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
     }
 
     function forwardNFT(uint256 id) external nonReentrant {
-        if (_rounds[id].state != State.AwaitingSale) revert WrongState();
+        Round storage r = _rounds[id];
+        if (r.state != State.AwaitingSale && !(r.state == State.Settled && r.kept)) revert WrongState();
         _forward(id);
+    }
+
+    /// @notice True once a kept NFT has stayed unforwardable for STRANDED_NFT_GRACE after allocation.
+    function nftStranded(uint256 id) public view returns (bool) {
+        Round storage r = _rounds[id];
+        return r.kept && !r.nftForwarded && block.timestamp >= uint256(r.allocatedAt) + STRANDED_NFT_GRACE;
     }
 
     function _forward(uint256 id) internal {
@@ -610,7 +646,7 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
     function depositSaleProceeds(uint256 id, bytes32 saleTxHash) external payable nonReentrant {
         if (msg.sender != teamWallet && msg.sender != owner()) revert NotSaleOperator();
         Round storage r = _rounds[id];
-        if (r.state != State.AwaitingSale || !r.nftForwarded) revert WrongState();
+        if (r.state != State.AwaitingSale || !(r.nftForwarded || nftStranded(id))) revert WrongState();
         if (msg.value == 0 || saleTxHash == 0) revert InvalidAmount();
         _credit(r, msg.value);
         emit SaleProceeds(id, saleTxHash, msg.value);
@@ -663,6 +699,7 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
         delete stake[id][bettor];
         r.totalShares -= shares;
         totalSharesOutstanding -= shares;
+        if (r.state == State.Open) unresolvedShares -= shares; // resolved rounds were released at reconciliation
         r.cash -= amount;
         accountedETH -= amount;
     }
@@ -710,6 +747,7 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
 
     function setFloorOracle(address to) external onlyOwner {
         _checkAddress(to);
+        _noActive();
         floorOracle = ICollectionFloorOracle(to);
         emit AddressSet("floorOracle", to);
     }
@@ -751,9 +789,7 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
         minBet = minimum;
         maxBettors = maximumBettors;
         bufferBps = buffer;
-        emit ParameterSet("minBet", minimum);
-        emit ParameterSet("maxBettors", maximumBettors);
-        emit ParameterSet("bufferBps", buffer);
+        emit BetParametersSet(minimum, maximumBettors, buffer);
     }
 
     function setSpinParameters(uint256 reward, uint256 gasPrice, uint256 weightedValue, uint16 negativeSlippage)
@@ -765,33 +801,33 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
         maxSpinGasPrice = gasPrice;
         minWeightedValue = weightedValue;
         maxNegativeSlippageBps = negativeSlippage;
-        emit ParameterSet("spinReward", reward);
-        emit ParameterSet("maxSpinGasPrice", gasPrice);
-        emit ParameterSet("minWeightedValue", weightedValue);
-        emit ParameterSet("maxNegativeSlippageBps", negativeSlippage);
+        emit SpinParametersSet(reward, gasPrice, weightedValue, negativeSlippage);
     }
 
+    /// @dev Decision policy is read live by unresolved allocations, so it cannot change while one exists. The
+    /// three timing settings must leave room inside the pool's live settlement window for a paid answer.
     function setDecisionParameters(
         uint16 haircut,
         uint16 margin,
         uint256 floorAge,
         uint256 safety,
         uint256 lead,
+        uint256 oracleLead,
         bool keep
     ) external onlyOwner {
-        if (haircut > BPS || margin > BPS || floorAge == 0 || floorAge > 30 days || safety > 30 days || lead > 30 days) revert InvalidParameter();
+        _noActive();
+        if (
+            haircut > BPS || margin > BPS || floorAge == 0 || floorAge > 30 days || safety > 30 days || lead > 30 days
+                || oracleLead > 30 days || safety + lead + oracleLead >= fwa.settlementWindow()
+        ) revert InvalidParameter();
         haircutBps = haircut;
         marginBps = margin;
         maxFloorAge = floorAge;
         safetyMargin = safety;
         fallbackLead = lead;
+        minOracleLead = oracleLead;
         defaultKeep = keep;
-        emit ParameterSet("haircutBps", haircut);
-        emit ParameterSet("marginBps", margin);
-        emit ParameterSet("maxFloorAge", floorAge);
-        emit ParameterSet("safetyMargin", safety);
-        emit ParameterSet("fallbackLead", lead);
-        emit ParameterSet("defaultKeep", keep ? 1 : 0);
+        emit DecisionParametersSet(haircut, margin, floorAge, safety, lead, oracleLead, keep);
     }
 
     function setFeeBps(uint16 fee) external onlyOwner {
@@ -822,7 +858,7 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
     }
 
     function _noBets() internal view {
-        if (totalSharesOutstanding != 0 || activeRoundId != 0) revert OutstandingBets();
+        if (unresolvedShares != 0 || activeRoundId != 0) revert OutstandingBets();
     }
 
     function _noActive() internal view {

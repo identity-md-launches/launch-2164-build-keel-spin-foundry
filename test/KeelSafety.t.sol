@@ -186,7 +186,7 @@ contract KeelSafetyTest is KeelBase {
         vm.expectRevert(KeelSpinVault.InvalidParameter.selector);
         vault.setSpinParameters(0, 0, 0, 0);
         vm.expectRevert(KeelSpinVault.InvalidParameter.selector);
-        vault.setDecisionParameters(10001, 500, 24 hours, 2 hours, 1 hours, true);
+        vault.setDecisionParameters(10001, 500, 24 hours, 2 hours, 1 hours, 10 minutes, true);
         vm.expectRevert(KeelSpinVault.InvalidAddress.selector);
         vault.setTeamWallet(address(vault));
         vm.expectRevert(KeelSpinVault.InvalidAddress.selector);

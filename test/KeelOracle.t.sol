@@ -5,6 +5,7 @@ import {KeelBase} from "./KeelBase.t.sol";
 import {KeelSpinVault} from "../src/KeelSpinVault.sol";
 import {OracleAttestation, OracleAttestationConsumer} from "../src/OracleAttestation.sol";
 import {OracleBody} from "../src/OracleBody.sol";
+import {MockFloor, RejectNFT} from "./mocks/Protocols.sol";
 
 contract KeelOracleTest is KeelBase {
     function testColdOracleCallbackFits200kGas() public {
@@ -191,12 +192,78 @@ contract KeelOracleTest is KeelBase {
     }
 
     function testShortLiveWindowSaturatesAndDoesNotPayOracle() public {
-        pool.setWindow(1 hours);
+        // A window shorter than the configured timing (pool governance change after configuration) saturates.
+        pool.setWindow(20 minutes);
         uint256 id = _ready();
-        assertEq(vault.decisionDeadline(id), block.timestamp);
+        assertEq(vault.decisionDeadline(id), block.timestamp + 10 minutes);
         assertEq(vault.fallbackAt(id), block.timestamp);
         vault.requestDecision(id);
         assertEq(intake.nonce(), 0);
+        _state(id, KeelSpinVault.State.AwaitingSale);
+    }
+
+    function testLiveOneHourWindowLeavesRoomForPaidOracleDecision() public {
+        pool.setWindow(1 hours);
+        uint256 id = _ready();
+        uint256 allocatedAt = vault.rounds(id).allocatedAt;
+        assertEq(vault.decisionDeadline(id), allocatedAt + 50 minutes);
+        assertEq(vault.fallbackAt(id), allocatedAt + 30 minutes);
+        vault.requestDecision(id);
+        _state(id, KeelSpinVault.State.OraclePending);
+        assertEq(intake.nonce(), 1);
+        vm.warp(block.timestamp + 5 minutes);
+        _answer(id, 2 ether);
+        vault.executeDecision(id);
+        _state(id, KeelSpinVault.State.AwaitingSale);
+        assertEq(nft.ownerOf(1), team);
+        assertEq(uint256(vault.rounds(id).path), uint256(KeelSpinVault.DecisionPath.Oracle));
+    }
+
+    function testNoPaidAskWhenAnswerCouldNotLandBeforeFallback() public {
+        uint256 id = _ready();
+        floor.set(0.5 ether, block.timestamp);
+        uint256 imdBefore = vault.imdBalance();
+        vm.warp(vault.fallbackAt(id) - vault.minOracleLead() + 1);
+        vault.requestDecision(id);
+        assertEq(intake.nonce(), 0);
+        assertEq(vault.imdBalance(), imdBefore);
+        _state(id, KeelSpinVault.State.Settled);
+        assertEq(uint256(vault.rounds(id).path), uint256(KeelSpinVault.DecisionPath.FallbackFloor));
+    }
+
+    function testLastMomentPaidAskStillAccepted() public {
+        uint256 id = _ready();
+        vm.warp(vault.fallbackAt(id) - vault.minOracleLead());
+        vault.requestDecision(id);
+        _state(id, KeelSpinVault.State.OraclePending);
+        assertEq(intake.nonce(), 1);
+    }
+
+    function testTimingParametersMustFitLiveWindow() public {
+        pool.setWindow(1 hours);
+        vm.expectRevert(KeelSpinVault.InvalidParameter.selector);
+        vault.setDecisionParameters(1500, 500, 24 hours, 20 minutes, 20 minutes, 20 minutes, true);
+        vault.setDecisionParameters(1500, 500, 24 hours, 20 minutes, 20 minutes, 19 minutes, true);
+        assertEq(vault.minOracleLead(), 19 minutes);
+    }
+
+    function testResolvedRoundReentryRetriesForwardInsteadOfReverting() public {
+        RejectNFT recipient = new RejectNFT();
+        vault.setTeamWallet(address(recipient));
+        uint256 id = _ready();
+        floor.set(30 ether, block.timestamp);
+        vault.requestDecision(id);
+        _state(id, KeelSpinVault.State.AwaitingSale);
+        assertEq(vault.activeRoundId(), 0);
+        vault.requestDecision(id);
+        vault.executeDecision(id);
+        vault.settleFallback(id);
+        vault.syncRound(id);
+        assertEq(nft.ownerOf(1), address(vault));
+        recipient.setReject(false);
+        vault.executeDecision(id);
+        assertEq(nft.ownerOf(1), address(recipient));
+        vault.settleFallback(id);
         _state(id, KeelSpinVault.State.AwaitingSale);
     }
 
@@ -217,7 +284,7 @@ contract KeelOracleTest is KeelBase {
     }
 
     function testFallbackNoFloorUsesOwnerSetDefault() public {
-        vault.setDecisionParameters(1500, 500, 24 hours, 2 hours, 1 hours, false);
+        vault.setDecisionParameters(1500, 500, 24 hours, 2 hours, 1 hours, 10 minutes, false);
         uint256 id = _ready();
         _fallback(id);
         _state(id, KeelSpinVault.State.Settled);
@@ -324,5 +391,24 @@ contract KeelOracleTest is KeelBase {
         vault.setOracleSigner(team);
         vm.expectRevert(KeelSpinVault.SpinInProgress.selector);
         vault.setIMD(address(imd));
+    }
+
+    function testOwnerCannotFlipAllocatedRoundThroughFloorOrPolicy() public {
+        uint256 id = _ready();
+        floor.set(0.5 ether, block.timestamp);
+        MockFloor fake = new MockFloor();
+        fake.set(100 ether, block.timestamp);
+        vm.expectRevert(KeelSpinVault.SpinInProgress.selector);
+        vault.setFloorOracle(address(fake));
+        vm.expectRevert(KeelSpinVault.SpinInProgress.selector);
+        vault.setDecisionParameters(0, 500, 24 hours, 10 minutes, 20 minutes, 10 minutes, true);
+        uint256 buffer = vault.rounds(id).cash;
+        _fallback(id);
+        _state(id, KeelSpinVault.State.Settled);
+        assertEq(nft.ownerOf(1), depositor);
+        assertEq(vault.claimable(id, alice), buffer + 0.9 ether);
+        vault.setFloorOracle(address(fake));
+        vault.setDecisionParameters(0, 500, 24 hours, 10 minutes, 20 minutes, 10 minutes, true);
+        assertEq(address(vault.floorOracle()), address(fake));
     }
 }

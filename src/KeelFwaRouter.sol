@@ -54,7 +54,7 @@ contract KeelFwaRouter is Ownable, ReentrancyGuard {
 
     function setPool(address to) external onlyOwner nonReentrant {
         if (to == address(0)) revert InvalidConfiguration();
-        if (IKeelVault(vault).totalSharesOutstanding() != 0) revert OutstandingBets();
+        if (IKeelVault(vault).unresolvedShares() != 0) revert OutstandingBets();
         pool = IFWAV2(to);
         emit PoolSet(to);
     }
