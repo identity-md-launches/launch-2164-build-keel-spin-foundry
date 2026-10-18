@@ -1,0 +1,26 @@
+{
+  "kind": "evm_contracts",
+  "contracts": [
+    {
+      "contract": "KeelSpinVault",
+      "constructorArgs": [
+        "$owner",
+        "0x958C41181182e76F221331b2755b77D9e1426A98",
+        "0xaA4D9009a4664604b57644bF13e447E9036727DC",
+        "0xa43e6f75ee006411f79ac1c84120606c2330de82",
+        "0xd34a99bc0f67ae1bbd63c660e6d0b0dd03e263b7",
+        "0x5598aa9146215bc13eb26f2c692ad1461fd32982",
+        "$owner"
+      ]
+    },
+    {
+      "contract": "KeelFwaRouter",
+      "constructorArgs": [
+        "$owner",
+        "$contract:KeelSpinVault",
+        "0x958C41181182e76F221331b2755b77D9e1426A98"
+      ]
+    }
+  ],
+  "notes": "Ethereum mainnet Keel Spin: deploy KeelSpinVault first, then KeelFwaRouter referencing the vault. Both owners and the initial teamWallet are $owner. The vault pools ETH bets, settles FWAV2 NFT acquisitions and distributes round proceeds through pull claims. The router purchases only for the vault and directs builder revenue to teamWallet. After deployment, the owner calls vault.setRouter(router) before betting can begin. The oracle signer matches the attester published at https://api.imd.fun/oracle/requests?limit=1. The owner configures the published FWA transfer helper through router.setTransferHelper before claiming builder token rewards."
+}
