@@ -112,7 +112,7 @@ contract KeelRevisionChecksTest is KeelBase {
 
     function testZeroOracleLeadAnswerAtCutoffIsRefusedAndFallsBack() public {
         // With the lead set to zero an ask one second before fallbackAt is still paid; its answer must
-        // then land before the cutoff or be refused. (The ask at exactly fallbackAt is reported separately.)
+        // then land before the cutoff or be refused. An ask at exactly fallbackAt is not paid (fuzzed below).
         vault.setDecisionParameters(1500, 500, 24 hours, 10 minutes, 20 minutes, 0, true);
         uint256 id = _ready();
         vm.warp(vault.fallbackAt(id) - 1);
@@ -185,5 +185,86 @@ contract KeelRevisionChecksTest is KeelBase {
         }
         assertLe(vault.unresolvedShares(), vault.totalSharesOutstanding());
         _solvent();
+    }
+
+    /// forge-config: default.fuzz.runs = 256
+    function testFuzzPaidAskOnlyWhenAnswerCanLand(uint256 leadSeed, uint256 offsetSeed) public {
+        uint256 window = pool.settlementWindow();
+        uint256 lead = bound(leadSeed, 0, window - 30 minutes - 1);
+        vault.setDecisionParameters(1500, 500, 24 hours, 10 minutes, 20 minutes, lead, true);
+        uint256 id = _ready();
+        uint256 allocatedAt = vault.rounds(id).allocatedAt;
+        uint256 cutoff = vault.fallbackAt(id);
+        uint256 t = bound(offsetSeed, allocatedAt, cutoff);
+        vm.warp(t);
+        uint256 imdBefore = vault.imdBalance();
+        vault.requestDecision(id);
+        if (t + lead < cutoff) {
+            // Paid: the answer must still be accepted at the last second before the cutoff.
+            assertEq(intake.nonce(), 1, "ask expected");
+            assertEq(imdBefore - vault.imdBalance(), 0.5 ether);
+            _state(id, KeelSpinVault.State.OraclePending);
+            vm.warp(cutoff - 1);
+            _answer(id, 2 ether);
+            _state(id, KeelSpinVault.State.DecisionReady);
+        } else {
+            // Not paid: no floor is set, so the fallback applies defaultKeep at once.
+            assertEq(intake.nonce(), 0, "paid for an answer that cannot land");
+            assertEq(vault.imdBalance(), imdBefore);
+            _state(id, KeelSpinVault.State.AwaitingSale);
+            assertEq(uint256(vault.rounds(id).path), uint256(KeelSpinVault.DecisionPath.FallbackDefault));
+        }
+        _solvent();
+    }
+
+    function testRecoverAfterStrandedSettlementLeavesClaimsUnchanged() public {
+        uint256 id = _ready();
+        uint256 listingId = vault.rounds(id).listingId;
+        nft.setRejectTransfers(true);
+        vm.warp(block.timestamp + pool.settlementWindow());
+        pool.finalizeUnsettled(listingId);
+        vault.syncRound(id);
+        vm.warp(uint256(vault.rounds(id).allocatedAt) + 30 days);
+        vm.deal(team, 1 ether);
+        vm.prank(team);
+        vault.depositSaleProceeds{value: 0.3 ether}(id, keccak256("stranded"));
+        _state(id, KeelSpinVault.State.Settled);
+        uint256 owed = vault.claimable(id, alice);
+        uint256 accounted = vault.accountedETH();
+        nft.setRejectTransfers(false);
+        // Anyone may trigger the recovery; it moves the NFT only, never bettor ETH or the round state.
+        vm.prank(keeper);
+        vault.recoverStuckNFT(id);
+        assertEq(nft.ownerOf(1), team);
+        _state(id, KeelSpinVault.State.Settled);
+        assertEq(vault.claimable(id, alice), owed);
+        assertEq(vault.accountedETH(), accounted);
+        // A second proceeds deposit is still refused after the recovery.
+        vm.prank(team);
+        vm.expectRevert(KeelSpinVault.WrongState.selector);
+        vault.depositSaleProceeds{value: 0.1 ether}(id, keccak256("again"));
+        uint256 before = alice.balance;
+        vm.prank(alice);
+        vault.claim(id);
+        assertEq(alice.balance - before, owed);
+        _solvent();
+    }
+
+    function testRecoverOnNormallyForwardedSettledRoundReverts() public {
+        uint256 id = _ready();
+        floor.set(30 ether, block.timestamp);
+        vault.requestDecision(id);
+        _state(id, KeelSpinVault.State.AwaitingSale);
+        assertEq(nft.ownerOf(1), team);
+        vm.deal(team, 1 ether);
+        vm.prank(team);
+        vault.depositSaleProceeds{value: 1 ether}(id, keccak256("sale"));
+        _state(id, KeelSpinVault.State.Settled);
+        uint256 owed = vault.claimable(id, alice);
+        // Settled && kept passes the vault's state gate, but the pool owes the vault nothing.
+        vm.expectRevert("not stuck recipient");
+        vault.recoverStuckNFT(id);
+        assertEq(vault.claimable(id, alice), owed);
+        assertEq(nft.ownerOf(1), team);
     }
 }
