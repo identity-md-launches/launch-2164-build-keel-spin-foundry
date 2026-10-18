@@ -266,6 +266,55 @@ contract KeelSettlementTest is KeelBase {
         _solvent();
     }
 
+    function testStuckKeptNFTRemainsRecoverableAfterStrandedSettlement() public {
+        uint256 id = _ready();
+        // FWA's best-effort delivery fails: the NFT stays in the pool, owed to the vault.
+        nft.setRejectTransfers(true);
+        vm.warp(block.timestamp + pool.settlementWindow());
+        uint256 listing = vault.rounds(id).listingId;
+        pool.finalizeUnsettled(listing);
+        vault.syncRound(id);
+        _state(id, KeelSpinVault.State.AwaitingSale);
+        assertTrue(vault.rounds(id).kept);
+        assertFalse(vault.rounds(id).nftForwarded);
+        assertEq(pool.stuckNFTRecipient(listing), address(vault));
+        uint256 buffer = vault.rounds(id).cash;
+        // The team settles the round through the stranded path once the grace period has passed.
+        vm.warp(uint256(vault.rounds(id).allocatedAt) + 30 days);
+        assertTrue(vault.nftStranded(id));
+        vm.deal(team, 1 ether);
+        vm.prank(team);
+        vault.depositSaleProceeds{value: 1}(id, keccak256("stranded"));
+        _state(id, KeelSpinVault.State.Settled);
+        assertEq(vault.claimable(id, alice), buffer + 1);
+        // While the collection still rejects, the pool's recovery reverts and nothing is marked forwarded.
+        vm.expectRevert("NFT transfer disabled");
+        vault.recoverStuckNFT(id);
+        // Once it transfers again, the vault (the only address FWA lets pull the token) recovers and forwards it.
+        nft.setRejectTransfers(false);
+        vault.recoverStuckNFT(id);
+        assertEq(pool.stuckNFTRecipient(listing), address(0));
+        assertEq(nft.ownerOf(1), team, "kept NFT is permanently stuck in the FWA pool");
+        assertTrue(vault.rounds(id).nftForwarded);
+        assertFalse(vault.nftStranded(id));
+        // A repeated call has nothing to recover: the pool no longer owes the vault anything.
+        vm.expectRevert("not stuck recipient");
+        vault.recoverStuckNFT(id);
+        vault.forwardNFT(id);
+        assertEq(nft.ownerOf(1), team);
+        _solvent();
+    }
+
+    function testRecoverStuckNFTRejectsEthSettledRound() public {
+        uint256 id = _ready();
+        floor.set(0.5 ether, block.timestamp);
+        _fallback(id);
+        _state(id, KeelSpinVault.State.Settled);
+        assertFalse(vault.rounds(id).kept);
+        vm.expectRevert(KeelSpinVault.WrongState.selector);
+        vault.recoverStuckNFT(id);
+    }
+
     function testForwardNFTRejectsEthSettledRound() public {
         uint256 id = _ready();
         floor.set(0.5 ether, block.timestamp);

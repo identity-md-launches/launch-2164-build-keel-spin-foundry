@@ -427,8 +427,9 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
             _resolve(id, true, DecisionPath.ObviousFloor);
             return;
         }
-        // A paid answer arrives minutes later and is refused at fallbackAt, so never pay when it cannot land.
-        if (r.oracleFailed || block.timestamp + minOracleLead > fallbackAt(id)) {
+        // A paid answer arrives minutes later and is refused from fallbackAt on (onOracleResult uses >=), so only
+        // pay while strictly more than minOracleLead seconds remain; with a zero lead both checks then agree.
+        if (r.oracleFailed || block.timestamp + minOracleLead >= fallbackAt(id)) {
             _fallback(id);
             return;
         }
@@ -634,10 +635,12 @@ contract KeelSpinVault is Ownable, ReentrancyGuard, OracleAttestationConsumer, I
         }
     }
 
+    /// @notice Pull a kept NFT that FWA could not deliver. Only the vault may call the pool for it, so this stays
+    /// open after a stranded settlement (Settled && kept): the token must never be locked in the pool for good.
     function recoverStuckNFT(uint256 id) external nonReentrant {
         Round storage r = _rounds[id];
         if (activeRoundId == id) _sync(id);
-        if (r.state != State.AwaitingSale) revert WrongState();
+        if (r.state != State.AwaitingSale && !(r.state == State.Settled && r.kept)) revert WrongState();
         IFWAV2(r.pool).recoverStuckNFT(r.listingId);
         emit StuckNFTRecovered(id);
         _forward(id);

@@ -223,7 +223,9 @@ contract KeelOracleTest is KeelBase {
         uint256 id = _ready();
         floor.set(0.5 ether, block.timestamp);
         uint256 imdBefore = vault.imdBalance();
-        vm.warp(vault.fallbackAt(id) - vault.minOracleLead() + 1);
+        // Exactly minOracleLead seconds left: an answer would have to land before fallbackAt, so less room than
+        // the configured lead. No paid ask.
+        vm.warp(vault.fallbackAt(id) - vault.minOracleLead());
         vault.requestDecision(id);
         assertEq(intake.nonce(), 0);
         assertEq(vault.imdBalance(), imdBefore);
@@ -233,10 +235,39 @@ contract KeelOracleTest is KeelBase {
 
     function testLastMomentPaidAskStillAccepted() public {
         uint256 id = _ready();
-        vm.warp(vault.fallbackAt(id) - vault.minOracleLead());
+        vm.warp(vault.fallbackAt(id) - vault.minOracleLead() - 1);
         vault.requestDecision(id);
         _state(id, KeelSpinVault.State.OraclePending);
         assertEq(intake.nonce(), 1);
+        // The answer still lands strictly before fallbackAt, which is the last instant onOracleResult accepts.
+        vm.warp(vault.fallbackAt(id) - 1);
+        _answer(id, 2 ether);
+        _state(id, KeelSpinVault.State.DecisionReady);
+    }
+
+    function testZeroLeadNeverPaysForAnUnanswerableQuestion() public {
+        vault.setDecisionParameters(1500, 500, 24 hours, 10 minutes, 20 minutes, 0, true);
+        uint256 id = _ready();
+        uint256 imdBefore = vault.imdBalance();
+        vm.warp(vault.fallbackAt(id));
+        vault.requestDecision(id);
+        assertEq(intake.nonce(), 0, "paid ask sent at fallbackAt");
+        assertEq(vault.imdBalance(), imdBefore, "IMD spent on an unanswerable request");
+        // No floor is set, so the fallback rule applied defaultKeep.
+        _state(id, KeelSpinVault.State.AwaitingSale);
+        assertEq(uint256(vault.rounds(id).path), uint256(KeelSpinVault.DecisionPath.FallbackDefault));
+        assertEq(nft.ownerOf(1), team);
+    }
+
+    function testZeroLeadStillAsksOneSecondBeforeFallback() public {
+        vault.setDecisionParameters(1500, 500, 24 hours, 10 minutes, 20 minutes, 0, true);
+        uint256 id = _ready();
+        vm.warp(vault.fallbackAt(id) - 1);
+        vault.requestDecision(id);
+        _state(id, KeelSpinVault.State.OraclePending);
+        assertEq(intake.nonce(), 1);
+        _answer(id, 2 ether);
+        _state(id, KeelSpinVault.State.DecisionReady);
     }
 
     function testTimingParametersMustFitLiveWindow() public {
