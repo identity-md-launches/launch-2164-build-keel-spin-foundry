@@ -391,6 +391,7 @@ contract KeelLifecycleInvariantTest is KeelBase {
         uint256 allShares;
         uint256 liability;
         uint256 active;
+        uint256 unresolved;
         for (uint256 id = 1; id <= vault.roundCount(); ++id) {
             KeelSpinVault.Round memory r = vault.rounds(id);
             uint256 shares;
@@ -419,12 +420,16 @@ contract KeelLifecycleInvariantTest is KeelBase {
                 assertTrue(r.nftForwarded);
                 assertEq(nft.ownerOf(r.tokenId), team);
             }
+            if (r.state != KeelSpinVault.State.AwaitingSale && r.state != KeelSpinVault.State.Settled) {
+                unresolved += shares;
+            }
             allCash += r.cash;
             allShares += shares;
         }
         assertLe(active, 1);
         assertEq(active == 0, vault.activeRoundId() == 0);
         assertEq(allShares, vault.totalSharesOutstanding());
+        assertEq(unresolved, vault.unresolvedShares(), "migration gate disagrees with non-terminal stake");
         assertEq(allCash + vault.feeCredit(team), vault.accountedETH());
         assertLe(liability + vault.feeCredit(team), address(vault).balance);
         assertLe(vault.accountedETH(), address(vault).balance);
